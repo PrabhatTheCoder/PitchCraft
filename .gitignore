@@ -35,6 +35,8 @@ staticfiles/
 
 # Ignore migrations (if they are generated automatically)
 **/migrations/**
+**/migrations/*.py
+!**/migrations/__init__.py
 
 # Ignore compiled files
 *.egg-info/
