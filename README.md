@@ -1,5 +1,7 @@
 # PitchCraft
 
+🌐 **Live Demo:** http://54.179.240.41/
+
 A small Django + DRF API for PR consultants: keep a media contact list, define a
 campaign brief, and generate a personalized pitch email per journalist using
 Claude — instead of one generic mail-merge blast.
