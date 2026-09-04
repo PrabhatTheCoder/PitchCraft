@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 
 import os
 from pathlib import Path
+from decouple import config
 
 from dotenv import load_dotenv
 
@@ -46,8 +47,10 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
-    'contacts',
+    "rest_framework_simplejwt.token_blacklist",
+    'users',
     'campaigns',
+    'contacts',
 ]
 
 REST_FRAMEWORK = {
@@ -70,7 +73,7 @@ ROOT_URLCONF = 'pitchcraft.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -88,10 +91,16 @@ WSGI_APPLICATION = 'pitchcraft.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
+
+# Database configuration
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': config('DB_NAME'),
+        'USER': config('DB_USER'),
+        'PASSWORD': config('DB_PASSWORD'),
+        'HOST': config('DB_HOST', default='localhost'),
+        'PORT': config('DB_PORT', default='5432'),
     }
 }
 
@@ -126,6 +135,29 @@ USE_I18N = True
 
 USE_TZ = True
 
+from datetime import timedelta
+
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
+    ),
+    "DEFAULT_PERMISSION_CLASSES": (
+        "rest_framework.permissions.IsAuthenticated",
+    ),
+}
+
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+
+    "AUTH_HEADER_TYPES": ("Bearer",),
+}
+
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
@@ -141,3 +173,93 @@ MAILERS = {
         'BACKEND': 'django.core.mail.backends.console.EmailBackend',
     },
 }
+
+AUTH_USER_MODEL = "users.User"
+
+
+LOG_DIR = os.path.join(BASE_DIR, 'logs')
+os.makedirs(LOG_DIR, exist_ok=True)
+
+
+APP_LOG_FILENAME = os.path.join(BASE_DIR, 'logs', 'app.log')
+ERROR_LOG_FILENAME = os.path.join(BASE_DIR, 'logs', 'error.log')
+SENSITIVE_LOG_FILENAME = os.path.join(BASE_DIR, 'logs', 'sensitive.log')
+LOGFILE_SIZE = 1024 * 1024 * 50
+LOGFILE_COUNT = 10
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'standard': {
+            'format': "[%(asctime)s] %(levelname)s [%(filename)s:%(lineno)s] [%(AppName)s] %(message)s",
+            'datefmt': "%d-%b-%Y %H:%M:%S"
+        }
+    },
+    'filters': {
+        'require_debug_false': {
+            '()': 'django.utils.log.RequireDebugFalse'
+        },
+    },
+    'handlers': {
+        'applog': {
+            'level': 'INFO',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': APP_LOG_FILENAME,
+            'maxBytes': LOGFILE_SIZE,
+            'backupCount': LOGFILE_COUNT,
+            'formatter': 'standard',
+            'encoding': 'utf-8',
+        },
+        'errorlog': {
+            'level': 'ERROR',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': ERROR_LOG_FILENAME,
+            'maxBytes': LOGFILE_SIZE,
+            'backupCount': LOGFILE_COUNT,
+            'formatter': 'standard',
+            'encoding': 'utf-8',
+        },
+        'sensitivelog': {
+            'level': 'INFO',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': SENSITIVE_LOG_FILENAME,
+            'maxBytes': LOGFILE_SIZE,
+            'backupCount': LOGFILE_COUNT,
+            'formatter': 'standard',
+            'encoding': 'utf-8',
+        },
+        'console': {
+            'level': 'INFO',
+            'class': 'logging.StreamHandler',
+            'formatter': 'standard',
+        },
+    },
+    'loggers': {
+
+        'campaigns':{
+            'handlers': ['applog', 'errorlog', 'console'],
+            'level': 'INFO',
+            'propagate': True,
+        },
+
+        'retrieval':{
+            'handlers': ['applog', 'errorlog', 'console'],
+            'level': 'INFO',
+            'propagate': True,
+        },
+        'contacts':{
+            'handlers': ['applog', 'errorlog', 'console'],
+            'level': 'INFO',
+            'propagate': True,
+        },
+    }
+}
+
+ANTHROPIC_API_KEY = config("ANTHROPIC_API_KEY", default="Fake-open-ai-key")
+ANTHROPIC_MODEL = os.environ.get('ANTHROPIC_MODEL', 'claude-sonnet-4-6')
+
+AI_PROVIDER = config('AI_PROVIDER', 'groq')   # 'groq' or 'anthropic'
+
+GROQ_API_KEY = config('GROQ_API_KEY', '')
+GROQ_MODEL = config('GROQ_MODEL', 'llama-3.3-70b-versatile')

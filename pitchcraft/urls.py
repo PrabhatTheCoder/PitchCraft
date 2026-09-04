@@ -16,9 +16,20 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import include, path
+from rest_framework_simplejwt.views import TokenRefreshView
+from django.views.generic import TemplateView
+
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/', include('contacts.urls')),
-    path('api/', include('campaigns.urls')),
+    path('api/v1/auth/', include('users.urls')),
+    path('api/v1/campaigns/', include('campaigns.urls')),
+    path('api/v1/contacts/', include('contacts.urls')),
+
+    path('admin/', admin.site.urls),
+    path('api/v1/auth/', include('users.urls')),
+    path('api/v1/auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('api/v1/contacts/', include('contacts.urls')),
+    path('api/v1/campaigns/', include('campaigns.urls')),
+    path('', TemplateView.as_view(template_name='index.html'), name='frontend'),
 ]

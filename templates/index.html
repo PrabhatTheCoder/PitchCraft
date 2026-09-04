@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PitchCraft</title>
+<style>
+  :root { --border: #ddd; --muted: #666; --accent: #2b6cb0; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Segoe UI, sans-serif; max-width: 900px; margin: 0 auto; padding: 24px; color: #222; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  h2 { font-size: 16px; margin: 28px 0 10px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  input, textarea, select, button { font: inherit; padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; }
+  textarea { width: 100%; min-height: 60px; }
+  button { background: var(--accent); color: #fff; border: none; cursor: pointer; }
+  button.secondary { background: #eee; color: #222; }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .card { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+  .b-pending, .b-generating { background: #fff3cd; }
+  .b-ready { background: #d4edda; }
+  .b-failed { background: #f8d7da; }
+  .b-sent { background: #d1ecf1; }
+  .b-draft { background: #eee; }
+  #app { display: none; }
+  .error { color: #c0392b; font-size: 13px; margin-top: 4px; }
+  pre { white-space: pre-wrap; font-family: inherit; background: #fafafa; padding: 8px; border-radius: 6px; }
+
+  /* --- Auth card --- */
+  #auth {
+    max-width: 360px;
+    margin: 80px auto;
+    padding: 28px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  #auth h1 { text-align: center; margin-bottom: 2px; }
+  #auth p.muted { text-align: center; margin-bottom: 20px; }
+  #auth .row { flex-direction: column; margin-bottom: 10px; }
+  #auth input { width: 100%; }
+  #auth-submit { width: 100%; padding: 10px; font-size: 15px; margin-top: 4px; }
+  #auth-toggle-row { text-align: center; margin-top: 14px; font-size: 13px; }
+  #auth-toggle-row a { color: var(--accent); cursor: pointer; text-decoration: none; }
+  #auth-toggle-row a:hover { text-decoration: underline; }
+  #signup-fields { display: none; }
+</style>
+</head>
+<body>
+
+<div id="auth">
+  <h1>PitchCraft</h1>
+  <p class="muted" id="auth-subtitle">Log in to your account</p>
+
+  <div class="row" id="signup-fields">
+    <input id="auth-username" placeholder="username">
+    <input id="auth-first" placeholder="first name">
+    <input id="auth-last" placeholder="last name">
+  </div>
+
+  <div class="row">
+    <input id="auth-email" placeholder="email">
+    <input id="auth-password" type="password" placeholder="password">
+  </div>
+
+  <button id="auth-submit" onclick="handleAuthSubmit()">Log in</button>
+
+  <div id="auth-toggle-row">
+    <span id="auth-toggle-text">New here?</span>
+    <a onclick="toggleAuthMode()">Sign up</a>
+  </div>
+
+  <div id="auth-error" class="error"></div>
+</div>
+
+<div id="app">
+  <div class="row" style="justify-content: space-between; align-items:center;">
+    <h1>PitchCraft</h1>
+    <button class="secondary" onclick="logout()">Log out</button>
+  </div>
+
+  <h2>Media contacts</h2>
+  <div class="row">
+    <input id="c-name" placeholder="Name">
+    <input id="c-email" placeholder="Email">
+    <input id="c-outlet" placeholder="Outlet">
+    <input id="c-beat" placeholder="Beat">
+    <button onclick="createContact()">Add contact</button>
+  </div>
+  <div id="contacts-list"></div>
+
+  <h2>Campaigns</h2>
+  <div class="row">
+    <input id="p-name" placeholder="Campaign name">
+    <input id="p-client" placeholder="Client name">
+    <select id="p-tone">
+      <option value="professional">Professional</option>
+      <option value="casual">Casual</option>
+      <option value="bold">Bold</option>
+    </select>
+  </div>
+  <div class="row">
+    <textarea id="p-brief" placeholder="Brief: what's the news, why it matters..."></textarea>
+  </div>
+  <button onclick="createCampaign()">Add campaign</button>
+  <div id="campaigns-list"></div>
+
+  <h2>Generate a pitch</h2>
+  <div class="row">
+    <select id="gen-campaign"></select>
+    <select id="gen-contact"></select>
+    <button onclick="generatePitch()">Generate pitch</button>
+  </div>
+
+  <h2>Pitches</h2>
+  <div id="pitches-list"></div>
+</div>
+
+<script>
+const API = "/api/v1";
+let ACCESS = localStorage.getItem("pc_access") || null;
+let REFRESH = localStorage.getItem("pc_refresh") || null;
+let pollTimer = null;
+let authMode = "login"; // default view
+
+function saveTokens(access, refresh) {
+  ACCESS = access; REFRESH = refresh;
+  localStorage.setItem("pc_access", access);
+  localStorage.setItem("pc_refresh", refresh);
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    ...opts,
+    headers: {
+      "Content-Type": "application/json",
+      ...(ACCESS ? { Authorization: "Bearer " + ACCESS } : {}),
+      ...(opts.headers || {}),
+    },
+  });
+  if (res.status === 204) return null;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    let msg = data.error;
+    if (!msg) {
+      // flatten DRF field errors like {"username": ["required"]}
+      msg = Object.entries(data).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : v}`).join(" | ") || res.statusText;
+    }
+    throw new Error(msg);
+  }
+  return data;
+}
+
+// --- Auth mode toggle ---
+function toggleAuthMode() {
+  authMode = authMode === "login" ? "signup" : "login";
+  document.getElementById("signup-fields").style.display = authMode === "signup" ? "flex" : "none";
+  document.getElementById("auth-submit").textContent = authMode === "signup" ? "Sign up" : "Log in";
+  document.getElementById("auth-subtitle").textContent = authMode === "signup" ? "Create your account" : "Log in to your account";
+  document.getElementById("auth-toggle-text").textContent = authMode === "signup" ? "Already have an account?" : "New here?";
+  document.querySelector("#auth-toggle-row a").textContent = authMode === "signup" ? "Log in" : "Sign up";
+  document.getElementById("auth-error").textContent = "";
+}
+
+function handleAuthSubmit() {
+  if (authMode === "signup") signup(); else login();
+}
+
+async function signup() {
+  try {
+    const payload = {
+      username: val("auth-username"),
+      first_name: val("auth-first"),
+      last_name: val("auth-last"),
+      email: val("auth-email"),
+      password: val("auth-password"),
+    };
+    const data = await api("/auth/signup/", { method: "POST", body: JSON.stringify(payload) });
+    saveTokens(data.access, data.refresh);
+    showApp();
+  } catch (e) { document.getElementById("auth-error").textContent = e.message; }
+}
+
+async function login() {
+  try {
+    const email = val("auth-email");
+    const password = val("auth-password");
+    const data = await api("/auth/login/", { method: "POST", body: JSON.stringify({ email, password }) });
+    saveTokens(data.access, data.refresh);
+    showApp();
+  } catch (e) { document.getElementById("auth-error").textContent = e.message; }
+}
+
+async function logout() {
+  try { await api("/auth/logout/", { method: "POST", body: JSON.stringify({ refresh: REFRESH }) }); } catch (e) {}
+  localStorage.removeItem("pc_access"); localStorage.removeItem("pc_refresh");
+  ACCESS = null; REFRESH = null;
+  clearInterval(pollTimer);
+  document.getElementById("app").style.display = "none";
+  document.getElementById("auth").style.display = "block";
+}
+
+function showApp() {
+  document.getElementById("auth").style.display = "none";
+  document.getElementById("app").style.display = "block";
+  refreshAll();
+  pollTimer = setInterval(refreshPitches, 4000);
+}
+
+async function refreshAll() {
+  await Promise.all([refreshContacts(), refreshCampaigns(), refreshPitches()]);
+}
+
+// --- Contacts ---
+async function createContact() {
+  const payload = {
+    name: val("c-name"), email: val("c-email"), outlet: val("c-outlet"), beat: val("c-beat"),
+  };
+  await api("/contacts/create-media-contacts/", { method: "POST", body: JSON.stringify(payload) });
+  ["c-name", "c-email", "c-outlet", "c-beat"].forEach(clear);
+  refreshContacts();
+}
+
+async function refreshContacts() {
+  const contacts = await api("/contacts/list-media-contacts/");
+  const list = document.getElementById("contacts-list");
+  list.innerHTML = contacts.map(c => `
+    <div class="card">
+      <b>${esc(c.name)}</b> — ${esc(c.outlet)} <span class="muted">(${esc(c.beat || "no beat")})</span>
+      <div class="muted">${esc(c.email)}</div>
+    </div>`).join("") || `<p class="muted">No contacts yet.</p>`;
+
+  const sel = document.getElementById("gen-contact");
+  sel.innerHTML = contacts.map(c => `<option value="${c.id}">${esc(c.name)} — ${esc(c.outlet)}</option>`).join("");
+}
+
+// --- Campaigns ---
+async function createCampaign() {
+  const payload = {
+    name: val("p-name"), client_name: val("p-client"), brief: val("p-brief"), tone: val("p-tone"),
+  };
+  await api("/campaigns/create-campaigns/", { method: "POST", body: JSON.stringify(payload) });
+  ["p-name", "p-client", "p-brief"].forEach(clear);
+  refreshCampaigns();
+}
+
+async function refreshCampaigns() {
+  const campaigns = await api("/campaigns/list-campaigns/");
+  const list = document.getElementById("campaigns-list");
+  list.innerHTML = campaigns.map(c => `
+    <div class="card">
+      <b>${esc(c.name)}</b> — ${esc(c.client_name)} <span class="muted">(${esc(c.tone)})</span>
+      <div class="muted">${esc(c.brief)}</div>
+    </div>`).join("") || `<p class="muted">No campaigns yet.</p>`;
+
+  const sel = document.getElementById("gen-campaign");
+  sel.innerHTML = campaigns.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+}
+
+// --- Pitches ---
+async function generatePitch() {
+  const campaign = document.getElementById("gen-campaign").value;
+  const contact = document.getElementById("gen-contact").value;
+  if (!campaign || !contact) return;
+  await api("/campaigns/pitches/", { method: "POST", body: JSON.stringify({ campaign, contact }) });
+  refreshPitches();
+}
+
+async function markSent(id) {
+  await api(`/campaigns/pitches/${id}/`, { method: "PATCH", body: JSON.stringify({ status: "sent" }) });
+  refreshPitches();
+}
+
+async function refreshPitches() {
+  const pitches = await api("/campaigns/pitches/");
+  const list = document.getElementById("pitches-list");
+  list.innerHTML = pitches.map(p => `
+    <div class="card">
+      <div class="row" style="justify-content: space-between;">
+        <b>${esc(p.campaign_name)} → ${esc(p.contact_name)}</b>
+        <span>
+          <span class="badge b-${p.generation_status}">${p.generation_status}</span>
+          <span class="badge b-${p.status}">${p.status}</span>
+        </span>
+      </div>
+      ${p.generation_status === "ready" ? `
+        <div><b>${esc(p.subject)}</b></div>
+        <pre>${esc(p.body)}</pre>
+        ${p.status === "draft" ? `<button onclick="markSent('${p.id}')">Mark sent</button>` : ""}
+      ` : ""}
+      ${p.generation_status === "failed" ? `<div class="error">${esc(p.generation_error)}</div>` : ""}
+    </div>`).join("") || `<p class="muted">No pitches yet.</p>`;
+}
+
+function val(id) { return document.getElementById(id).value; }
+function clear(id) { document.getElementById(id).value = ""; }
+function esc(s) { return (s ?? "").toString().replace(/[&<>"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m])); }
+
+if (ACCESS) showApp();
+</script>
+</body>
+</html>
