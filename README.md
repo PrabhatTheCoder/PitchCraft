@@ -21,6 +21,12 @@ covers.
   (campaign, contact) so re-generating updates the same row instead of
   duplicating it.
 
+## Async task processing
+ 
+- **Celery** — runs pitch generation (the AI call) off the request thread
+- **Redis** — Celery broker + result backend
+- Retry-on-failure built into the task (`max_retries=3`, 30s backoff) for transient AI/network errors
+
 ## API
 
 | Method | Endpoint                          | Purpose                          |
@@ -43,7 +49,7 @@ python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-cp .env.example .env   # then add your ANTHROPIC_API_KEY
+cp .env.example .env   # then add your Groq_API_KEY
 
 python manage.py migrate
 python manage.py createsuperuser   # optional, for /admin/
@@ -68,23 +74,63 @@ from a spec, not autocomplete-as-you-type:
    routers, admin registration — from that spec.
 3. **The AI-integration boundary was deliberately isolated**
    (`campaigns/services.py`) so it could be unit-tested without hitting the
-   real Anthropic API — `test_generate_pitch_*` in `campaigns/tests.py` mock
+   real Groq API — `test_generate_pitch_*` in `campaigns/tests.py` mock
    `generate_pitch` and assert on status codes, idempotency (re-generating
    updates the same `Pitch` row instead of duplicating), and failure handling
    (a `PitchGenerationError` surfaces as a `502`, not a `500`).
-4. **Verification**: read every generated file, ran `python manage.py test`,
-   and manually exercised `/api/pitches/generate/` against the real Anthropic
-   API with a sample contact/campaign to confirm the JSON contract
-   (`{"subject": ..., "body": ...}`) actually holds up against real model
-   output, not just the mocked tests.
+
+## Example usage
+ 
+**1. Sign up**
+```
+POST /api/v1/auth/signup/
+{ "email": "priya@acmepr.com", "password": "..." }
+→ { "access": "...", "refresh": "..." }
+```
+ 
+**2. Add a media contact**
+```
+POST /api/v1/contacts/create-media-contacts/
+{ "name": "Fatima Al Rashid", "email": "fatima@gulfbusinessnews.com",
+  "outlet": "Gulf Business News", "beat": "fintech, startups",
+  "notes": "Prefers short, data-driven pitches." }
+```
+ 
+**3. Add a campaign brief**
+```
+POST /api/v1/campaigns/create-campaigns/
+{ "name": "Acme Pay Series A", "client_name": "Acme Pay",
+  "brief": "Acme Pay, a Dubai-based B2B payments startup, closed an $8M Series A. Expanding into Saudi Arabia next quarter.",
+  "tone": "professional" }
+```
+ 
+**4. Generate a pitch** — enqueues a Celery task, returns immediately
+```
+POST /api/v1/campaigns/pitches/
+{ "campaign": "<campaign-id>", "contact": "<contact-id>" }
+→ { "generation_status": "generating", ... }
+```
+ 
+**5. Poll until ready** (frontend does this every 4s)
+```
+GET /api/v1/campaigns/pitches/
+→ { "generation_status": "ready",
+    "subject": "Dubai fintech Acme Pay raises $8M, eyes Saudi expansion",
+    "body": "Hi Fatima, given your recent piece on UAE fintech funding...",
+    "status": "draft" }
+```
+ 
+**6. Mark it sent** once the consultant has copied it into their own email client
+```
+PATCH /api/v1/campaigns/pitches/<id>/
+{ "status": "sent" }
+```
 
 ## What I'd do next
-
-- Swap the JSON-via-prompt contract for Claude's structured tool-use /
-  JSON schema output instead of asking nicely for JSON in the prompt.
-- Add a `/pitches/{id}/regenerate-with-feedback/` endpoint so a consultant
-  can say "shorter" or "less formal" and get a revision instead of a full
-  redo.
-- Bulk generate: one campaign → pitches for a whole contact list, with
-  rate-limit-aware batching.
-- Auth (this is currently open — fine for a take-home, not for prod).
+ 
+### Product features
+ 
+- **RAG pipeline for pitch generation** — let clients upload multiple reference docs (past coverage, brand guidelines, bios) and use retrieval to ground the AI-generated pitch in that context, producing stronger, more on-brand output.
+- **Multi-channel outreach** — extend beyond the current channel with WhatsApp API, Email, SMS, and Voice, drawing on prior experience integrating these.
+- **In-app email sending** — let clients send the generated pitch as an email directly from the page, without copy-pasting into a separate client.
+- **Cron-based email automation** — let clients schedule and automate recurring sends (e.g., follow-ups) instead of triggering everything manually.
