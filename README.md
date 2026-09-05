@@ -42,7 +42,7 @@ Structured, rotating file-based logging instead of print statements:
 Each log file rotates at 50MB with 10 backups kept (`RotatingFileHandler`), so logs
 don't grow unbounded on the EC2 instance.
 
-Per-app loggers (`campaigns`, `retrieval`, `contacts`) are wired to `applog` +
+Per-app loggers (`campaigns`, `pitches`, `contacts`) are wired to `applog` +
 `errorlog` + `console`, so you can trace what happened during pitch generation,
 retrieval, or contact operations without digging through Django's default
 request logs.
