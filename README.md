@@ -29,6 +29,24 @@ covers.
 - **Redis** — Celery broker + result backend
 - Retry-on-failure built into the task (`max_retries=3`, 30s backoff) for transient AI/network errors
 
+
+## Logging
+
+Structured, rotating file-based logging instead of print statements:
+
+- **`logs/app.log`** — general INFO+ application logs
+- **`logs/error.log`** — ERROR+ only, separated for quick triage
+- **`logs/sensitive.log`** — dedicated stream for sensitive-data-adjacent events, kept isolated from the general app log
+- **Console handler** — mirrors app-level logs to stdout (useful in Docker)
+
+Each log file rotates at 50MB with 10 backups kept (`RotatingFileHandler`), so logs
+don't grow unbounded on the EC2 instance.
+
+Per-app loggers (`campaigns`, `retrieval`, `contacts`) are wired to `applog` +
+`errorlog` + `console`, so you can trace what happened during pitch generation,
+retrieval, or contact operations without digging through Django's default
+request logs.
+
 ## API
 
 | Method | Endpoint                          | Purpose                          |
